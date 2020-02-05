@@ -46,8 +46,8 @@ namespace gazebo
       this->base_joint = _model->GetJoint("iris_demo::iris_demo::iris_gimbal_mount");
 
       // Set up PID controllers.
-      this->tilt_pid = common::PID(50, 500, 0);
-      this->base_pid = common::PID(50, 500, 0);
+      this->tilt_pid = common::PID(5, 1, 2);
+      this->base_pid = common::PID(5, 1, 2);
 
       // Apply the PID controllers to the joint.
       this->model->GetJointController()->SetPositionPID(
@@ -67,7 +67,6 @@ namespace gazebo
 
       const std::string x_setpoint_topic_name = "/iris/camera/x/setpoint";
       const std::string y_setpoint_topic_name = "/iris/camera/y/setpoint";
-      const std::string xy_setpoint_topic_name = "/iris/camera/xy/setpoint";
 
 if (!ros::isInitialized())
 {
