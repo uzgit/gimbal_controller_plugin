@@ -46,8 +46,9 @@ namespace gazebo
       this->base_joint = _model->GetJoint("iris_demo::iris_demo::iris_gimbal_mount");
 
       // Set up PID controllers.
-      this->tilt_pid = common::PID(5, 1, 2);
-      this->base_pid = common::PID(5, 1, 2);
+      // parameters in order: p, i, d, imax, imin, cmdMax, cmdMin
+      this->tilt_pid = common::PID(8, 0, 0.5, 0, 0, 3.14159265, -3.14159265);
+      this->base_pid = common::PID(8, 0, 0.5, 0, 0, 3.14159265, -3.14159265);
 
       // Apply the PID controllers to the joint.
       this->model->GetJointController()->SetPositionPID(
