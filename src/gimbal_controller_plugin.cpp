@@ -4,6 +4,7 @@
 #include <gazebo/gazebo.hh>
 #include <gazebo/physics/physics.hh>
 #include <gazebo/msgs/msgs.hh>
+#include <std_msgs/Bool.h>
 #include <std_msgs/Float64.h>
 #include <thread>
 #include "ros/ros.h"
@@ -45,10 +46,13 @@ namespace gazebo
       this->tilt_joint = _model->GetJoint("iris_demo::iris_demo::gimbal_small_2d::tilt_joint");
       this->base_joint = _model->GetJoint("iris_demo::iris_demo::iris_gimbal_mount");
 
+//      this->tilt_joint->SetPosition(0, 0, true);
+//      this->base_joint->SetPosition(1, -1.5708, true);
+
       // Set up PID controllers.
       // parameters in order: p, i, d, imax, imin, cmdMax, cmdMin
-      this->tilt_pid = common::PID(8, 0, 0.5, 0, 0, 3.14159265, -3.14159265);
-      this->base_pid = common::PID(8, 0, 0.5, 0, 0, 3.14159265, -3.14159265);
+      this->tilt_pid = common::PID(5, 0, 0.25, 0, 0, 3.14159265, -3.14159265);
+      this->base_pid = common::PID(5, 0, 0.25, 0, 0, 3.14159265, -3.14159265);
 
       // Apply the PID controllers to the joint.
       this->model->GetJointController()->SetPositionPID(
@@ -68,6 +72,7 @@ namespace gazebo
 
       const std::string x_setpoint_topic_name = "/iris/camera/x/setpoint";
       const std::string y_setpoint_topic_name = "/iris/camera/y/setpoint";
+      const std::string idle_state_topic_name = "/iris/camera/idle_state";
 
 if (!ros::isInitialized())
 {
@@ -85,7 +90,6 @@ ros::SubscribeOptions so_x = ros::SubscribeOptions::create<std_msgs::Float64>(
 	boost::bind(&GimbalControllerPlugin::set_base, this, _1),
 	ros::VoidPtr(),
 	&this->ros_queue);
-
 this->ros_subscriber_x = this->ros_node->subscribe(so_x);
 
 ros::SubscribeOptions so_y = ros::SubscribeOptions::create<std_msgs::Float64>(
@@ -96,6 +100,14 @@ ros::SubscribeOptions so_y = ros::SubscribeOptions::create<std_msgs::Float64>(
 	&this->ros_queue);
 this->ros_subscriber_y = this->ros_node->subscribe(so_y);
 
+ros::SubscribeOptions so_idle = ros::SubscribeOptions::create<std_msgs::Bool>(
+	idle_state_topic_name,
+	1,
+	boost::bind(&GimbalControllerPlugin::set_idle, this, _1),
+	ros::VoidPtr(),
+	&this->ros_queue);
+this->idle_state_subscriber = this->ros_node->subscribe(so_idle);
+
 this->ros_queue_thread = std::thread(std::bind(&GimbalControllerPlugin::queue_thread, this));
 
     }
@@ -103,6 +115,7 @@ this->ros_queue_thread = std::thread(std::bind(&GimbalControllerPlugin::queue_th
     private: std::unique_ptr<ros::NodeHandle> ros_node;
     private: ros::Subscriber ros_subscriber_x;
     private: ros::Subscriber ros_subscriber_y;
+    private: ros::Subscriber idle_state_subscriber;
     private: ros::CallbackQueue ros_queue;
     private: std::thread ros_queue_thread;
 
@@ -128,22 +141,35 @@ private: void queue_thread()
     private: transport::NodePtr node_handle;
     private: transport::SubscriberPtr setpoint_subscriber_x;
     private: transport::SubscriberPtr setpoint_subscriber_y;
-    private: transport::SubscriberPtr setpoint_subscriber_xy;
+//    private: transport::SubscriberPtr idle_state_subscriber;
 
 	     //		   const msgs::ConstFloat64Ptr
 
     private: void set_tilt(const std_msgs::Float64ConstPtr & _msg)
     {
 	    this->model->GetJointController()->SetPositionTarget(
-		this->tilt_joint->GetScopedName(), _msg->data
+		this->tilt_joint->GetScopedName(), this->tilt_joint->Position(0) + _msg->data
 	    );
     }
 
     private: void set_base(const std_msgs::Float64ConstPtr & _msg)
     {
 	    this->model->GetJointController()->SetPositionTarget(
-		this->base_joint->GetScopedName(), _msg->data
+		this->base_joint->GetScopedName(), this->base_joint->Position(0) + _msg->data
 	    );
+    }
+
+    private: void set_idle(const std_msgs::BoolConstPtr & _msg)
+    {
+	    if (_msg->data)
+	    {
+		    this->model->GetJointController()->SetPositionTarget(
+				    this->base_joint->GetScopedName(), 0
+			); 
+		    this->model->GetJointController()->SetPositionTarget(
+				    this->tilt_joint->GetScopedName(), 0
+			);
+	    }
     }
 
     private: void OnMsg(ConstVector3dPtr &_msg)
