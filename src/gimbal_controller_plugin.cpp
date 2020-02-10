@@ -1,5 +1,6 @@
 #include <gazebo/gazebo.hh>
 #include <gazebo/physics/physics.hh>
+#include <gazebo/transport/transport.hh>
 #include <gazebo/msgs/msgs.hh>
 #include <std_msgs/Bool.h>
 #include <std_msgs/Float64.h>
@@ -7,6 +8,8 @@
 #include "ros/ros.h"
 #include "ros/callback_queue.h"
 #include "ros/subscribe_options.h"
+
+#include <dynamic_reconfigure/server.h>
 
 using namespace gazebo;
 
@@ -41,8 +44,8 @@ class GimbalControllerPlugin : public ModelPlugin
 
 		// set up PID controllers
 		// parameters in order: p, i, d, imax, imin, cmdMax, cmdMin
-		this->tilt_pid = common::PID(3, 0, 0.5, 0, 0, 3.14159265, -3.14159265);
-		this->base_pid = common::PID(3, 0, 0.5, 0, 0, 3.14159265, -3.14159265);
+		this->tilt_pid = common::PID(3, 0, 0.3, 2, 0, 1.5708, -1.5708);
+		this->base_pid = common::PID(0.8, 0, 0, 0.3, 0, 1.5708, -1.5708);
 
 		// apply the PID controllers to the joint
 		this->model->GetJointController()->SetPositionPID( this->tilt_joint->GetScopedName(), this->tilt_pid );
@@ -56,6 +59,12 @@ class GimbalControllerPlugin : public ModelPlugin
 		const std::string x_setpoint_topic_name = "/iris/camera/x/setpoint";
 		const std::string y_setpoint_topic_name = "/iris/camera/y/setpoint";
 		const std::string idle_state_topic_name = "/iris/camera/idle_state";
+		const std::string x_k_p_topic_name      = "/gimbal_controller/x/k_p";
+		const std::string x_k_i_topic_name      = "/gimbal_controller/x/k_i";
+		const std::string x_k_d_topic_name      = "/gimbal_controller/x/k_d";
+		const std::string y_k_p_topic_name      = "/gimbal_controller/y/k_p";
+		const std::string y_k_i_topic_name      = "/gimbal_controller/y/k_i";
+		const std::string y_k_d_topic_name      = "/gimbal_controller/y/k_d";
 
 		// sanity check for ROS
 		if ( ! ros::isInitialized() )
@@ -99,11 +108,66 @@ class GimbalControllerPlugin : public ModelPlugin
 		// initialize ROS message queue
 		this->ros_queue_thread = std::thread(std::bind(&GimbalControllerPlugin::queue_thread, this));
 
+		// initialize x_k_p subscriber
+		ros::SubscribeOptions so_x_k_p = ros::SubscribeOptions::create<std_msgs::Float64>(
+			x_k_p_topic_name,
+			1,
+			boost::bind(&GimbalControllerPlugin::set_x_k_p, this, _1),
+			ros::VoidPtr(),
+			& this->ros_queue);
+		this->x_k_p_subscriber = this->ros_node->subscribe(so_x_k_p);
+		// initialize x_k_i subscriber
+		ros::SubscribeOptions so_x_k_i = ros::SubscribeOptions::create<std_msgs::Float64>(
+			x_k_i_topic_name,
+			1,
+			boost::bind(&GimbalControllerPlugin::set_x_k_i, this, _1),
+			ros::VoidPtr(),
+			& this->ros_queue);
+		this->x_k_i_subscriber = this->ros_node->subscribe(so_x_k_i);
+		// initialize x_k_d subscriber
+		ros::SubscribeOptions so_x_k_d = ros::SubscribeOptions::create<std_msgs::Float64>(
+			x_k_d_topic_name,
+			1,
+			boost::bind(&GimbalControllerPlugin::set_x_k_d, this, _1),
+			ros::VoidPtr(),
+			& this->ros_queue);
+		this->x_k_d_subscriber = this->ros_node->subscribe(so_x_k_d);
+
+		// initialize y_k_p subscriber
+		ros::SubscribeOptions so_y_k_p = ros::SubscribeOptions::create<std_msgs::Float64>(
+			y_k_p_topic_name,
+			1,
+			boost::bind(&GimbalControllerPlugin::set_y_k_p, this, _1),
+			ros::VoidPtr(),
+			& this->ros_queue);
+		this->y_k_p_subscriber = this->ros_node->subscribe(so_y_k_p);
+		// initialize y_k_i subscriber
+		ros::SubscribeOptions so_y_k_i = ros::SubscribeOptions::create<std_msgs::Float64>(
+			y_k_i_topic_name,
+			1,
+			boost::bind(&GimbalControllerPlugin::set_y_k_i, this, _1),
+			ros::VoidPtr(),
+			& this->ros_queue);
+		this->y_k_i_subscriber = this->ros_node->subscribe(so_y_k_i);
+		// initialize y_k_d subscriber
+		ros::SubscribeOptions so_y_k_d = ros::SubscribeOptions::create<std_msgs::Float64>(
+			y_k_d_topic_name,
+			1,
+			boost::bind(&GimbalControllerPlugin::set_y_k_d, this, _1),
+			ros::VoidPtr(),
+			& this->ros_queue);
+		this->y_k_d_subscriber = this->ros_node->subscribe(so_y_k_d);
 	}
 
 	private: std::unique_ptr<ros::NodeHandle> ros_node;
 	private: ros::Subscriber ros_subscriber_x;
 	private: ros::Subscriber ros_subscriber_y;
+	private: ros::Subscriber x_k_p_subscriber;
+	private: ros::Subscriber x_k_i_subscriber;
+	private: ros::Subscriber x_k_d_subscriber;
+	private: ros::Subscriber y_k_p_subscriber;
+	private: ros::Subscriber y_k_i_subscriber;
+	private: ros::Subscriber y_k_d_subscriber;
 	private: ros::Subscriber idle_state_subscriber;
 	private: ros::CallbackQueue ros_queue;
 	private: std::thread ros_queue_thread;
@@ -113,6 +177,15 @@ class GimbalControllerPlugin : public ModelPlugin
 	private: common::PID tilt_pid;
 	private: common::PID base_pid;
 	private: transport::NodePtr node_handle;
+
+	private: double x_idle_setpoint;
+	private: double y_idle_setpoint;
+	private: double p_x;
+	private: double i_x;
+	private: double d_x;
+	private: double p_y;
+	private: double i_y;
+	private: double d_y;
 	
 	private: void OnRosMsg(const std_msgs::Float64ConstPtr & _msg)
 	{
@@ -145,6 +218,36 @@ class GimbalControllerPlugin : public ModelPlugin
 		    this->model->GetJointController()->SetPositionTarget( this->base_joint->GetScopedName(), 0 );
 		    this->model->GetJointController()->SetPositionTarget( this->tilt_joint->GetScopedName(), 0 );
 		}
+	}
+
+	private: void set_x_k_p(const std_msgs::Float64ConstPtr & _msg)
+	{
+		this->base_pid.SetPGain( _msg->data );
+		for(int i = 0; i < 100; i ++)
+		{
+			ROS_INFO("received %f", _msg->data);
+			std::cerr << _msg->data << std::endl;
+		}
+	}
+	private: void set_x_k_i(const std_msgs::Float64ConstPtr & _msg)
+	{
+		this->base_pid.SetIGain( _msg->data );
+	}
+	private: void set_x_k_d(const std_msgs::Float64ConstPtr & _msg)
+	{
+		this->base_pid.SetDGain( _msg->data );
+	}
+	private: void set_y_k_p(const std_msgs::Float64ConstPtr & _msg)
+	{
+		this->tilt_pid.SetPGain( _msg->data );
+	}
+	private: void set_y_k_i(const std_msgs::Float64ConstPtr & _msg)
+	{
+		this->tilt_pid.SetIGain( _msg->data );
+	}
+	private: void set_y_k_d(const std_msgs::Float64ConstPtr & _msg)
+	{
+		this->tilt_pid.SetDGain( _msg->data );
 	}
 
 	private: void OnMsg(ConstVector3dPtr &_msg)
