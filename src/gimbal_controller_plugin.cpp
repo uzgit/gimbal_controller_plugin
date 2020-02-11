@@ -44,7 +44,8 @@ class GimbalControllerPlugin : public ModelPlugin
 
 		// set up PID controllers
 		// parameters in order: p, i, d, imax, imin, cmdMax, cmdMin
-		this->tilt_pid = common::PID(3, 0, 0.3, 2, 0, 1.5708, -1.5708);
+		// tilt k_d started at 0.3
+		this->tilt_pid = common::PID(3, 0, 0.9, 2, 0, 1.5708, -1.5708);
 		this->base_pid = common::PID(0.8, 0, 0, 0.3, 0, 1.5708, -1.5708);
 
 		// apply the PID controllers to the joint
@@ -65,6 +66,8 @@ class GimbalControllerPlugin : public ModelPlugin
 		const std::string y_k_p_topic_name      = "/gimbal_controller/y/k_p";
 		const std::string y_k_i_topic_name      = "/gimbal_controller/y/k_i";
 		const std::string y_k_d_topic_name      = "/gimbal_controller/y/k_d";
+
+		
 
 		// sanity check for ROS
 		if ( ! ros::isInitialized() )
@@ -157,6 +160,13 @@ class GimbalControllerPlugin : public ModelPlugin
 			ros::VoidPtr(),
 			& this->ros_queue);
 		this->y_k_d_subscriber = this->ros_node->subscribe(so_y_k_d);
+
+/*		
+		// initial attempts
+		ignition::math::Vector3d pose;
+		pose = this->base_joint->RelativePose();
+		std::cerr << *pose << std::endl;
+*/
 	}
 
 	private: std::unique_ptr<ros::NodeHandle> ros_node;
@@ -171,6 +181,7 @@ class GimbalControllerPlugin : public ModelPlugin
 	private: ros::Subscriber idle_state_subscriber;
 	private: ros::CallbackQueue ros_queue;
 	private: std::thread ros_queue_thread;
+	private: ros::Publisher pose_publisher;
 	private: physics::ModelPtr model;
 	private: physics::JointPtr tilt_joint; // camera pitch control
 	private: physics::JointPtr base_joint; // camera yaw control
