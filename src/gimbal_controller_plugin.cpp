@@ -2,12 +2,14 @@
 #include <gazebo/physics/physics.hh>
 #include <gazebo/transport/transport.hh>
 #include <gazebo/msgs/msgs.hh>
+#include <geometry_msgs/Vector3.h>
 #include <std_msgs/Bool.h>
 #include <std_msgs/Float64.h>
 #include <thread>
 #include "ros/ros.h"
 #include "ros/callback_queue.h"
 #include "ros/subscribe_options.h"
+#include <rendering/rendering.hh>
 
 #include <dynamic_reconfigure/server.h>
 
@@ -65,9 +67,8 @@ class GimbalControllerPlugin : public ModelPlugin
 		const std::string x_k_d_topic_name      = "/gimbal_controller/x/k_d";
 		const std::string y_k_p_topic_name      = "/gimbal_controller/y/k_p";
 		const std::string y_k_i_topic_name      = "/gimbal_controller/y/k_i";
-		const std::string y_k_d_topic_name      = "/gimbal_controller/y/k_d";
-
-		
+		const std::string y_k_d_topic_name      = "/gimbal_controller/y/k_d";	
+		const std::string landing_pad_relative_position_topic_name	= "/landing_pad/relative_position";
 
 		// sanity check for ROS
 		if ( ! ros::isInitialized() )
@@ -161,12 +162,30 @@ class GimbalControllerPlugin : public ModelPlugin
 			& this->ros_queue);
 		this->y_k_d_subscriber = this->ros_node->subscribe(so_y_k_d);
 
+		// initialize landing_pad_relative_position subscriber
+		ros::SubscribeOptions so_landing_pad_relative_position = ros::SubscribeOptions::create<geometry_msgs::Vector3>(
+				landing_pad_relative_position_topic_name,
+				1,
+				boost::bind(&GimbalControllerPlugin::draw_line_to_landing_pad, this, _1),
+				ros::VoidPtr(),
+				& this->ros_queue
+				);
+		this->landing_pad_relative_position_subscriber = this->ros_node->subscribe(so_landing_pad_relative_position);
+
 /*		
 		// initial attempts
 		ignition::math::Vector3d pose;
 		pose = this->base_joint->RelativePose();
 		std::cerr << *pose << std::endl;
 */
+		std::cerr << this->base_joint->GetChild()->RelativePose() << std::endl;
+		std::cerr << this->tilt_joint->GetChild()->WorldPose() << std::endl;
+
+		ignition::math::Vector3 displacement = ignition::math::Vector3(50, 50, 50);
+		gazebo::rendering::Scene::DrawLine(
+				this->tilt_joint->GetChild()->WorldPose().Pos(),
+				this->tilt_joint->GetChild()->WorldPose().Pos() + displacement,
+				"line")
 	}
 
 	private: std::unique_ptr<ros::NodeHandle> ros_node;
@@ -179,6 +198,7 @@ class GimbalControllerPlugin : public ModelPlugin
 	private: ros::Subscriber y_k_i_subscriber;
 	private: ros::Subscriber y_k_d_subscriber;
 	private: ros::Subscriber idle_state_subscriber;
+	private: ros::Subscriber landing_pad_relative_position_subscriber;
 	private: ros::CallbackQueue ros_queue;
 	private: std::thread ros_queue_thread;
 	private: ros::Publisher pose_publisher;
@@ -189,6 +209,11 @@ class GimbalControllerPlugin : public ModelPlugin
 	private: common::PID base_pid;
 	private: transport::NodePtr node_handle;
 
+	private: void camera_relative_pose()
+	{
+		;
+	}
+
 	private: double x_idle_setpoint;
 	private: double y_idle_setpoint;
 	private: double p_x;
@@ -196,7 +221,7 @@ class GimbalControllerPlugin : public ModelPlugin
 	private: double d_x;
 	private: double p_y;
 	private: double i_y;
-	private: double d_y;
+	private: double d_y; 
 	
 	private: void OnRosMsg(const std_msgs::Float64ConstPtr & _msg)
 	{
@@ -259,6 +284,12 @@ class GimbalControllerPlugin : public ModelPlugin
 	private: void set_y_k_d(const std_msgs::Float64ConstPtr & _msg)
 	{
 		this->tilt_pid.SetDGain( _msg->data );
+	}
+
+	private: void draw_line_to_landing_pad(const geometry_msgs::Vector3ConstPtr & _msg)
+	{
+		std::cerr << "<" << _msg->x << ", " << _msg->y << ", " << _msg->z << ">" << std::endl;
+
 	}
 
 	private: void OnMsg(ConstVector3dPtr &_msg)
