@@ -9,7 +9,7 @@
 #include "ros/ros.h"
 #include "ros/callback_queue.h"
 #include "ros/subscribe_options.h"
-#include <rendering/rendering.hh>
+#include <gazebo/rendering/rendering.hh>
 
 #include <dynamic_reconfigure/server.h>
 
@@ -161,17 +161,6 @@ class GimbalControllerPlugin : public ModelPlugin
 			ros::VoidPtr(),
 			& this->ros_queue);
 		this->y_k_d_subscriber = this->ros_node->subscribe(so_y_k_d);
-
-		// initialize landing_pad_relative_position subscriber
-		ros::SubscribeOptions so_landing_pad_relative_position = ros::SubscribeOptions::create<geometry_msgs::Vector3>(
-				landing_pad_relative_position_topic_name,
-				1,
-				boost::bind(&GimbalControllerPlugin::draw_line_to_landing_pad, this, _1),
-				ros::VoidPtr(),
-				& this->ros_queue
-				);
-		this->landing_pad_relative_position_subscriber = this->ros_node->subscribe(so_landing_pad_relative_position);
-
 /*		
 		// initial attempts
 		ignition::math::Vector3d pose;
@@ -181,11 +170,6 @@ class GimbalControllerPlugin : public ModelPlugin
 		std::cerr << this->base_joint->GetChild()->RelativePose() << std::endl;
 		std::cerr << this->tilt_joint->GetChild()->WorldPose() << std::endl;
 
-		ignition::math::Vector3 displacement = ignition::math::Vector3(50, 50, 50);
-		gazebo::rendering::Scene::DrawLine(
-				this->tilt_joint->GetChild()->WorldPose().Pos(),
-				this->tilt_joint->GetChild()->WorldPose().Pos() + displacement,
-				"line")
 	}
 
 	private: std::unique_ptr<ros::NodeHandle> ros_node;
@@ -230,7 +214,7 @@ class GimbalControllerPlugin : public ModelPlugin
 
 	private: void queue_thread()
 	{
-		static const double timeout = 0.01;
+		static const double timeout = 0.05;
 		while(this->ros_node->ok())
 		{
 			this->ros_queue.callAvailable(ros::WallDuration(timeout));
@@ -284,12 +268,6 @@ class GimbalControllerPlugin : public ModelPlugin
 	private: void set_y_k_d(const std_msgs::Float64ConstPtr & _msg)
 	{
 		this->tilt_pid.SetDGain( _msg->data );
-	}
-
-	private: void draw_line_to_landing_pad(const geometry_msgs::Vector3ConstPtr & _msg)
-	{
-		std::cerr << "<" << _msg->x << ", " << _msg->y << ", " << _msg->z << ">" << std::endl;
-
 	}
 
 	private: void OnMsg(ConstVector3dPtr &_msg)
