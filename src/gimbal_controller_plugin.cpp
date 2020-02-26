@@ -167,8 +167,8 @@ class GimbalControllerPlugin : public ModelPlugin
 		pose = this->base_joint->RelativePose();
 		std::cerr << *pose << std::endl;
 */
-		std::cerr << this->base_joint->GetChild()->RelativePose() << std::endl;
-		std::cerr << this->tilt_joint->GetChild()->WorldPose() << std::endl;
+//		std::cerr << this->base_joint->GetChild()->RelativePose() << std::endl;
+//		std::cerr << this->tilt_joint->GetChild()->WorldPose() << std::endl;
 
 	}
 
