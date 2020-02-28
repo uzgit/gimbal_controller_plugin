@@ -45,10 +45,6 @@ class GimbalControllerPlugin : public ModelPlugin
 
 		// set up PID controllers
 		// parameters in order:        p,   i,   d,imax,imin, cmdMax,  cmdMin
-
-		// the first two are very shaky
-//		this->tilt_pid = common::PID( 3.0, 3.0, 0.5, 15.0, 0.0, 1.5708, -1.5708);
-//		this->base_pid = common::PID( 1.0, 0.5, 0.5, 15.0, 0.0, 1.5708, -1.5708);
 		this->tilt_pid = common::PID( 0.2, 0.1, 0.005, 15.0, 0.0, 1.5708, -1.5708);
 		this->base_pid = common::PID( 0.2, 0.1, 0.005, 15.0, 0.0, 1.5708, -1.5708);
 
@@ -111,12 +107,6 @@ class GimbalControllerPlugin : public ModelPlugin
 		this->publisher_queue = this->publisher_multi_queue.addPub<std_msgs::Float64>();
 		this->base_joint_position_publisher = this->ros_node->advertise<std_msgs::Float64>("/gimbal/x/position", 100);
 		this->tilt_joint_position_publisher = this->ros_node->advertise<std_msgs::Float64>("/gimbal/y/position", 100);
-
-//		this->orientation_publisher = this->ros_node->advertise<gazebo::msgs::Vector3>("/gimbal/orientation_rpy", 1000);
-//		while( ros::ok() )
-//		{
-//			
-//		}
 	}
 
 	private: std::unique_ptr<ros::NodeHandle> ros_node;
@@ -141,11 +131,6 @@ class GimbalControllerPlugin : public ModelPlugin
 	private: ros::Publisher tilt_joint_position_publisher;
 	private: PubQueue<std_msgs::Float64>::Ptr publisher_queue;
 	private: PubMultiQueue publisher_multi_queue;
-
-	private: void OnRosMsg(const std_msgs::Float64ConstPtr & _msg)
-	{
-		std::cerr << "received: " << _msg->data << std::endl;
-	}
 
 	private: void queue_thread()
 	{
