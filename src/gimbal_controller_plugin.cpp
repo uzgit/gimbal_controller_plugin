@@ -45,8 +45,10 @@ class GimbalControllerPlugin : public ModelPlugin
 
 		// set up PID controllers
 		// parameters in order:        p,   i,   d,imax,imin, cmdMax,  cmdMin
-		this->tilt_pid = common::PID( 0.2, 0.1, 0.005, 15.0, 0.0, 1.5708, -1.5708);
-		this->base_pid = common::PID( 0.2, 0.1, 0.005, 15.0, 0.0, 1.5708, -1.5708);
+		//this->tilt_pid = common::PID( 0.2, 0.1, 0.005, 15.0, 0.0, 1.5708, -1.5708);
+		//this->base_pid = common::PID( 0.2, 0.1, 0.005, 15.0, 0.0, 1.5708, -1.5708);
+		this->tilt_pid = common::PID( 0.5, 0.1, 0.05, 15.0, 0.0, 1.5708, -1.5708);
+		this->base_pid = common::PID( 0.5, 0.1, 0.05, 15.0, 0.0, 1.5708, -1.5708);
 
 		// apply the PID controllers to the joint
 		this->model->GetJointController()->SetPositionPID( this->tilt_joint->GetScopedName(), this->tilt_pid );
@@ -59,6 +61,12 @@ class GimbalControllerPlugin : public ModelPlugin
 		// subscribed topic names
 		const std::string x_setpoint_topic_name = "/gimbal/x/setpoint";
 		const std::string y_setpoint_topic_name = "/gimbal/y/setpoint";
+		const std::string x_kp_topic_name = "/gimbal/x/kp";
+		const std::string x_ki_topic_name = "/gimbal/x/ki";
+		const std::string x_kd_topic_name = "/gimbal/x/kd";
+		const std::string y_kp_topic_name = "/gimbal/y/kp";
+		const std::string y_ki_topic_name = "/gimbal/y/ki";
+		const std::string y_kd_topic_name = "/gimbal/y/kd";
 		const std::string idle_state_topic_name = "/gimbal/idle_state";
 
 		// sanity check for ROS
@@ -98,7 +106,67 @@ class GimbalControllerPlugin : public ModelPlugin
 			boost::bind(&GimbalControllerPlugin::set_idle, this, _1),
 			ros::VoidPtr(),
 			& this->ros_queue);
-		this->idle_state_subscriber = this->ros_node->subscribe(so_idle);
+//		this->idle_state_subscriber = this->ros_node->subscribe(so_idle);
+
+		// initialize kp subscriber for x dimension
+		ros::SubscribeOptions so_x_kp = ros::SubscribeOptions::create<std_msgs::Float64>(
+			x_kp_topic_name,
+			1,
+			boost::bind(&GimbalControllerPlugin::set_x_kp, this, _1),
+			ros::VoidPtr(),
+			& this->ros_queue
+			);
+		this->ros_subscriber_x_kp = this->ros_node->subscribe(so_x_kp);
+
+		// initialize ki subscriber for x dimension
+		ros::SubscribeOptions so_x_ki = ros::SubscribeOptions::create<std_msgs::Float64>(
+			x_ki_topic_name,
+			1,
+			boost::bind(&GimbalControllerPlugin::set_x_ki, this, _1),
+			ros::VoidPtr(),
+			& this->ros_queue
+			);
+		this->ros_subscriber_x_ki = this->ros_node->subscribe(so_x_ki);
+
+		// initialize kd subscriber for x dimension
+		ros::SubscribeOptions so_x_kd = ros::SubscribeOptions::create<std_msgs::Float64>(
+			x_kd_topic_name,
+			1,
+			boost::bind(&GimbalControllerPlugin::set_x_kd, this, _1),
+			ros::VoidPtr(),
+			& this->ros_queue
+			);
+		this->ros_subscriber_x_kd = this->ros_node->subscribe(so_x_kd);
+		
+		// initialize kp subscriber for y dimension
+		ros::SubscribeOptions so_y_kp = ros::SubscribeOptions::create<std_msgs::Float64>(
+			y_kp_topic_name,
+			1,
+			boost::bind(&GimbalControllerPlugin::set_y_kp, this, _1),
+			ros::VoidPtr(),
+			& this->ros_queue
+			);
+		this->ros_subscriber_y_kp = this->ros_node->subscribe(so_y_kp);
+
+		// initialize ki subscriber for y dimension
+		ros::SubscribeOptions so_y_ki = ros::SubscribeOptions::create<std_msgs::Float64>(
+			y_ki_topic_name,
+			1,
+			boost::bind(&GimbalControllerPlugin::set_y_ki, this, _1),
+			ros::VoidPtr(),
+			& this->ros_queue
+			);
+		this->ros_subscriber_y_ki = this->ros_node->subscribe(so_y_ki);
+
+		// initialize kd subscriber for y dimension
+		ros::SubscribeOptions so_y_kd = ros::SubscribeOptions::create<std_msgs::Float64>(
+			y_kd_topic_name,
+			1,
+			boost::bind(&GimbalControllerPlugin::set_y_kd, this, _1),
+			ros::VoidPtr(),
+			& this->ros_queue
+			);
+		this->ros_subscriber_y_kd = this->ros_node->subscribe(so_y_kd);
 
 		// initialize ROS message queue
 		this->ros_queue_thread = std::thread(std::bind(&GimbalControllerPlugin::queue_thread, this));
@@ -112,6 +180,12 @@ class GimbalControllerPlugin : public ModelPlugin
 	private: std::unique_ptr<ros::NodeHandle> ros_node;
 	private: ros::Subscriber ros_subscriber_x;
 	private: ros::Subscriber ros_subscriber_y;
+	private: ros::Subscriber ros_subscriber_x_kp;
+	private: ros::Subscriber ros_subscriber_x_ki;
+	private: ros::Subscriber ros_subscriber_x_kd;
+	private: ros::Subscriber ros_subscriber_y_kp;
+	private: ros::Subscriber ros_subscriber_y_ki;
+	private: ros::Subscriber ros_subscriber_y_kd;
 	private: ros::Subscriber idle_state_subscriber;
 	private: ros::Subscriber landing_pad_relative_position_subscriber;
 	private: ros::CallbackQueue ros_queue;
@@ -158,7 +232,34 @@ class GimbalControllerPlugin : public ModelPlugin
 		msg.data = this->base_joint->Position(0);
 		this->publisher_queue->push(msg, this->base_joint_position_publisher);
 	}
-
+	
+	private: void set_x_kp(const std_msgs::Float64ConstPtr & _msg)
+	{
+		std::cerr << "setting x_kp to " << _msg->data << std::endl;
+		this->base_pid.SetPGain( _msg->data );
+	}
+	private: void set_x_ki(const std_msgs::Float64ConstPtr & _msg)
+	{
+		this->base_pid.SetIGain( _msg->data );
+	}
+	private: void set_x_kd(const std_msgs::Float64ConstPtr & _msg)
+	{
+		this->base_pid.SetDGain( _msg->data );
+	}
+	
+	private: void set_y_kp(const std_msgs::Float64ConstPtr & _msg)
+	{
+		this->tilt_pid.SetPGain( _msg->data );
+	}
+	private: void set_y_ki(const std_msgs::Float64ConstPtr & _msg)
+	{
+		this->tilt_pid.SetIGain( _msg->data );
+	}
+	private: void set_y_kd(const std_msgs::Float64ConstPtr & _msg)
+	{
+		this->tilt_pid.SetDGain( _msg->data );
+	}
+	
 	private: void set_idle(const std_msgs::BoolConstPtr & _msg)
 	{
 		if (_msg->data)
