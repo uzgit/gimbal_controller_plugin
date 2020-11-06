@@ -40,14 +40,30 @@ class GimbalControllerPlugin : public ModelPlugin
 		      return;
 		}
 
+		// get joint names
+		this->tilt_joint_name = _sdf->Get<std::string>("tilt_joint");
+		this->pan_joint_name  = _sdf->Get<std::string>("pan_joint");
+
+		auto tilt_pid_parameters = _sdf->GetElement("tilt_pid");
+		this->tilt_pid_p = tilt_pid_parameters->Get<double>("p");
+		this->tilt_pid_i = tilt_pid_parameters->Get<double>("i");
+		this->tilt_pid_d = tilt_pid_parameters->Get<double>("d");
+		
+		auto  pan_pid_parameters = _sdf->GetElement("tilt_pid");
+		this->pan_pid_p = pan_pid_parameters->Get<double>("p");
+		this->pan_pid_i = pan_pid_parameters->Get<double>("i");
+		this->pan_pid_d = pan_pid_parameters->Get<double>("d");
+
 		// store the model pointer for convenience
 		this->model = _model;
  
 		try
 		{
 			// get pointers to the relevant joints
-			this->tilt_joint = _model->GetJoint("iris_demo::gimbal_small_2d::tilt_joint");
-			this->pan_joint  = _model->GetJoint("iris_demo::iris_gimbal_mount");
+//			this->tilt_joint = _model->GetJoint("iris_demo::gimbal_small_2d::tilt_joint");
+//			this->pan_joint  = _model->GetJoint("iris_demo::iris_gimbal_mount");
+			this->tilt_joint = _model->GetJoint(this->tilt_joint_name);
+			this->pan_joint  = _model->GetJoint(this->pan_joint_name);
 		
 			std::cerr << "Gimbal Controller Plugin is operating on the following joints:" << std::endl;
 			std::cerr << "\tTilt joint: " << this->tilt_joint->GetScopedName() << std::endl;
@@ -65,8 +81,14 @@ class GimbalControllerPlugin : public ModelPlugin
 		// parameters in order:        p,   i,   d,     imax,imin,   cmdMax,  cmdMin
 //		this->tilt_pid = common::PID( 0.5, 0.1, 0.01,  15.0, 0.0, 0.174533, -M_PI_2);
 //		this->pan_pid = common::PID( 0.5, 0.1, 0.05,   15.0, 0.0, 0.174533, -M_PI_2);
-		this->tilt_pid = common::PID( 0.5, 0.1, 0.05, 0, 0.0, M_PI, -M_PI);
-		this->pan_pid  = common::PID( 0.5, 0.1, 0.05, 0, 0.0, M_PI, -M_PI);
+//		this->tilt_pid = common::PID( 0.5, 0.1, 0.05, 0, 0.0, M_PI, -M_PI);
+//		this->pan_pid  = common::PID( 0.5, 0.1, 0.05, 0, 0.0, M_PI, -M_PI);
+		this->tilt_pid = common::PID( this->tilt_pid_p, this->tilt_pid_i, this->tilt_pid_d, 0, 0.0, M_PI, -M_PI);
+		this->pan_pid  = common::PID(  this->pan_pid_p, this->pan_pid_i,  this->pan_pid_d, 0, 0.0, M_PI, -M_PI);
+
+		std::cerr << "Using the following PID parameters:" << std::endl;
+		std::cerr << "\tTilt PID parameters (p, i, d) = (" << this->tilt_pid_p << ", " << this->tilt_pid_i << ", " << this->tilt_pid_d << ")" << std::endl;
+		std::cerr << "\t Pan PID parameters (p, i, d) = (" << this->pan_pid_p << ", " << this->pan_pid_i << ", " << this->pan_pid_d << ")" << std::endl;
 
 		// apply the PID controllers to the joint
 		this->model->GetJointController()->SetPositionPID( this->tilt_joint->GetScopedName(), this->tilt_pid );
@@ -81,8 +103,12 @@ class GimbalControllerPlugin : public ModelPlugin
 		set_tilt(0);
 
 		// subscribed topic names
-		const std::string x_control_effort_topic_name = "/pid/camera/control_effort/x";
-		const std::string y_control_effort_topic_name = "/pid/camera/control_effort/y";
+		this->target_pan_topic = _sdf->Get<std::string>("target_pan_topic");
+		this->target_tilt_topic = _sdf->Get<std::string>("target_tilt_topic");
+
+		std::cerr << "Subscribing to topics:" << std::endl;
+		std::cerr << "\tTarget tilt: " << this->target_tilt_topic << std::endl;
+		std::cerr << "\tTarget  pan: " << this->target_pan_topic << std::endl;
 
 		// sanity check if ROS is running
 		if ( ! ros::isInitialized() )
@@ -98,7 +124,7 @@ class GimbalControllerPlugin : public ModelPlugin
 		
 		// initialize x pixel position subscriber
 		ros::SubscribeOptions so_x_pixel_position = ros::SubscribeOptions::create<std_msgs::Float64>(
-			x_control_effort_topic_name,
+			target_pan_topic,
 			1,
 			boost::bind(&GimbalControllerPlugin::set_pan_callback, this, _1),
 			ros::VoidPtr(),
@@ -107,7 +133,7 @@ class GimbalControllerPlugin : public ModelPlugin
 		
 		// initialize y pixel position subscriber
 		ros::SubscribeOptions so_y_pixel_position = ros::SubscribeOptions::create<std_msgs::Float64>(
-			y_control_effort_topic_name,
+			target_tilt_topic,
 			1,
 			boost::bind(&GimbalControllerPlugin::set_tilt_callback, this, _1),
 			ros::VoidPtr(),
@@ -129,6 +155,18 @@ class GimbalControllerPlugin : public ModelPlugin
 	private: common::PID tilt_pid;
 	private: common::PID pan_pid;
 	private: transport::NodePtr node_handle;
+
+	private: std::string tilt_joint_name;
+	private: std::string pan_joint_name;
+	private: std::string target_pan_topic;
+	private: std::string target_tilt_topic;
+
+	private: double tilt_pid_p = 0;
+	private: double tilt_pid_i = 0;
+	private: double tilt_pid_d = 0;
+	private: double  pan_pid_p = 0;
+	private: double  pan_pid_i = 0;
+	private: double  pan_pid_d = 0;
 
 	private: double initial_tilt = 0.2;
 	private: double initial_pan  = 0.0;
