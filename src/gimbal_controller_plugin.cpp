@@ -10,6 +10,7 @@
 #include "ros/callback_queue.h"
 #include "ros/subscribe_options.h"
 #include <gazebo/rendering/rendering.hh>
+#include <mavros_msgs/OverrideRCIn.h>
 
 #include <dynamic_reconfigure/server.h>
 
@@ -41,22 +42,29 @@ class GimbalControllerPlugin : public ModelPlugin
 		}
 
 		// get joint names
+		std::cerr << "Attempting to get tilt_joint..." << std::endl;
 		this->tilt_joint_name = _sdf->Get<std::string>("tilt_joint");
+		std::cerr << "\tname: " << this->tilt_joint_name << std::endl;
+		std::cerr << "Attempting to get pan_joint..." << std::endl;
 		this->pan_joint_name  = _sdf->Get<std::string>("pan_joint");
+		std::cerr << "\tname: " << this->pan_joint_name << std::endl;
 
+		std::cerr << "Getting tilt pid parameters..." << std::endl;
 		auto tilt_pid_parameters = _sdf->GetElement("tilt_pid");
 		this->tilt_pid_p = tilt_pid_parameters->Get<double>("p");
 		this->tilt_pid_i = tilt_pid_parameters->Get<double>("i");
 		this->tilt_pid_d = tilt_pid_parameters->Get<double>("d");
 		
-		auto  pan_pid_parameters = _sdf->GetElement("tilt_pid");
+		std::cerr << "Getting pan pid parameters..." << std::endl;
+		auto  pan_pid_parameters = _sdf->GetElement("pan_pid");
 		this->pan_pid_p = pan_pid_parameters->Get<double>("p");
 		this->pan_pid_i = pan_pid_parameters->Get<double>("i");
 		this->pan_pid_d = pan_pid_parameters->Get<double>("d");
 
 		// store the model pointer for convenience
 		this->model = _model;
- 
+
+	        std::cerr << "Attempting to find relevant joints..." << std::endl;	
 		try
 		{
 			// get pointers to the relevant joints
@@ -66,7 +74,7 @@ class GimbalControllerPlugin : public ModelPlugin
 			this->pan_joint  = _model->GetJoint(this->pan_joint_name);
 		
 			std::cerr << "Gimbal Controller Plugin is operating on the following joints:" << std::endl;
-			std::cerr << "\tTilt joint: " << this->tilt_joint->GetScopedName() << std::endl;
+			std::cerr << "\tTilt joint: " << this->tilt_joint << " ---> " << this->tilt_joint->GetScopedName() << std::endl;
 			std::cerr << "\t Pan joint: " << this->pan_joint->GetScopedName() << std::endl;
 		}
 		catch( std::exception& e )
@@ -77,12 +85,23 @@ class GimbalControllerPlugin : public ModelPlugin
 			exit(-1);
 		}
 
+		// sanity check if ROS is running
+		if ( ! ros::isInitialized() )
+		{
+			int argc = 0;
+			char **argv = NULL;
+			ros::init(argc, argv, "gazebo_client",
+			ros::init_options::NoSigintHandler);
+		}
+
+		// initialize ROS node
+		this->ros_node.reset(new ros::NodeHandle("gazebo_client"));
+
+		// initialize ROS message queue
+		this->ros_queue_thread = std::thread(std::bind(&GimbalControllerPlugin::queue_thread, this));
+
 		// set up PID controllers
 		// parameters in order:        p,   i,   d,     imax,imin,   cmdMax,  cmdMin
-//		this->tilt_pid = common::PID( 0.5, 0.1, 0.01,  15.0, 0.0, 0.174533, -M_PI_2);
-//		this->pan_pid = common::PID( 0.5, 0.1, 0.05,   15.0, 0.0, 0.174533, -M_PI_2);
-//		this->tilt_pid = common::PID( 0.5, 0.1, 0.05, 0, 0.0, M_PI, -M_PI);
-//		this->pan_pid  = common::PID( 0.5, 0.1, 0.05, 0, 0.0, M_PI, -M_PI);
 		this->tilt_pid = common::PID( this->tilt_pid_p, this->tilt_pid_i, this->tilt_pid_d, 0, 0.0, M_PI, -M_PI);
 		this->pan_pid  = common::PID(  this->pan_pid_p, this->pan_pid_i,  this->pan_pid_d, 0, 0.0, M_PI, -M_PI);
 
@@ -99,49 +118,56 @@ class GimbalControllerPlugin : public ModelPlugin
 		// notify
 		std::cerr << "Setting initial gimbal positions:" << std::endl << "\tTilt: " << this->initial_tilt << std::endl << "\tPan:  " << this->initial_pan << std::endl;
 #endif
-		set_pan( 0 );
-		set_tilt(0);
 
 		// subscribed topic names
-		this->target_pan_topic = _sdf->Get<std::string>("target_pan_topic");
-		this->target_tilt_topic = _sdf->Get<std::string>("target_tilt_topic");
-
-		std::cerr << "Subscribing to topics:" << std::endl;
-		std::cerr << "\tTarget tilt: " << this->target_tilt_topic << std::endl;
-		std::cerr << "\tTarget  pan: " << this->target_pan_topic << std::endl;
-
-		// sanity check if ROS is running
-		if ( ! ros::isInitialized() )
+		try
 		{
-			int argc = 0;
-			char **argv = NULL;
-			ros::init(argc, argv, "gazebo_client",
-			ros::init_options::NoSigintHandler);
+			this->rc_override_topic = _sdf->Get<std::string>("rc_override_topic");
+			this->tilt_channel = _sdf->Get<int>("tilt_channel");
+			this->pan_channel = _sdf->Get<int>("pan_channel");
+
+			std::cerr << "Got rc_override_topic '" << this->rc_override_topic << "' with tilt_channel=" << this->tilt_channel << " and pan_channel=" << this->pan_channel << std::endl;
+
+			// initialize x pixel position subscriber
+			ros::SubscribeOptions so_mavros_rc_override = ros::SubscribeOptions::create<mavros_msgs::OverrideRCIn>(
+				rc_override_topic,
+				1,
+				boost::bind(&GimbalControllerPlugin::set_control_callback, this, _1),
+				ros::VoidPtr(),
+				& this->ros_queue);
+			this->ros_subscriber_x_pixel_position = this->ros_node->subscribe(so_mavros_rc_override);
+		}
+		catch( ... )
+		{
+			std::cerr << "Did not find rc_override_topic!" << std::endl;
+			this->target_pan_topic = _sdf->Get<std::string>("target_pan_topic");
+			this->target_tilt_topic = _sdf->Get<std::string>("target_tilt_topic");
+
+			std::cerr << "Subscribing to topics:" << std::endl;
+			std::cerr << "\tTarget tilt: " << this->target_tilt_topic << std::endl;
+			std::cerr << "\tTarget  pan: " << this->target_pan_topic << std::endl;
+
+			// initialize x pixel position subscriber
+			ros::SubscribeOptions so_x_pixel_position = ros::SubscribeOptions::create<std_msgs::Float64>(
+				target_pan_topic,
+				1,
+				boost::bind(&GimbalControllerPlugin::set_pan_callback, this, _1),
+				ros::VoidPtr(),
+				& this->ros_queue);
+			this->ros_subscriber_x_pixel_position = this->ros_node->subscribe(so_x_pixel_position);
+			
+			// initialize y pixel position subscriber
+			ros::SubscribeOptions so_y_pixel_position = ros::SubscribeOptions::create<std_msgs::Float64>(
+				target_tilt_topic,
+				1,
+				boost::bind(&GimbalControllerPlugin::set_tilt_callback, this, _1),
+				ros::VoidPtr(),
+				& this->ros_queue);
+			this->ros_subscriber_y_pixel_position = this->ros_node->subscribe(so_y_pixel_position);
 		}
 
-		// initialize ROS node
-		this->ros_node.reset(new ros::NodeHandle("gazebo_client"));
-		
-		// initialize x pixel position subscriber
-		ros::SubscribeOptions so_x_pixel_position = ros::SubscribeOptions::create<std_msgs::Float64>(
-			target_pan_topic,
-			1,
-			boost::bind(&GimbalControllerPlugin::set_pan_callback, this, _1),
-			ros::VoidPtr(),
-			& this->ros_queue);
-		this->ros_subscriber_x_pixel_position = this->ros_node->subscribe(so_x_pixel_position);
-		
-		// initialize y pixel position subscriber
-		ros::SubscribeOptions so_y_pixel_position = ros::SubscribeOptions::create<std_msgs::Float64>(
-			target_tilt_topic,
-			1,
-			boost::bind(&GimbalControllerPlugin::set_tilt_callback, this, _1),
-			ros::VoidPtr(),
-			& this->ros_queue);
-		this->ros_subscriber_y_pixel_position = this->ros_node->subscribe(so_y_pixel_position);
-	
-		// initialize ROS message queue
-		this->ros_queue_thread = std::thread(std::bind(&GimbalControllerPlugin::queue_thread, this));
+		set_pan( 0 );
+		set_tilt( -1 );
 	}
 
 	private: std::unique_ptr<ros::NodeHandle> ros_node;
@@ -158,6 +184,9 @@ class GimbalControllerPlugin : public ModelPlugin
 
 	private: std::string tilt_joint_name;
 	private: std::string pan_joint_name;
+	private: std::string rc_override_topic;
+	private: int tilt_channel;
+	private: int pan_channel;
 	private: std::string target_pan_topic;
 	private: std::string target_tilt_topic;
 
@@ -209,6 +238,28 @@ class GimbalControllerPlugin : public ModelPlugin
 	private: void set_pan_callback(const std_msgs::Float64ConstPtr & _msg)
 	{
 		set_pan(M_PI * _msg->data);
+	}
+
+	private: double pwm_signal_to_control_effort( int pwm )
+	{
+		double result = (pwm - (double)1500) / (double)500;
+		return result;
+	}
+
+	private: void set_control_callback(const mavros_msgs::OverrideRCIn::ConstPtr & _msg)
+	{
+		std::cerr << "in control callback" << std::endl;
+
+		int pan_pwm = _msg->channels[this->pan_channel - 1];
+		int tilt_pwm = _msg->channels[this->tilt_channel - 1];
+
+		double pan_effort  = pwm_signal_to_control_effort(pan_pwm);
+		double tilt_effort = pwm_signal_to_control_effort(tilt_pwm);
+
+		std::cerr << "(pan, tilt) = (" << pan_pwm << ", " << tilt_pwm << ") = (" << pan_effort << ", " << tilt_effort << ")" << std::endl;
+
+		set_pan( M_PI * pan_effort );
+		set_tilt( M_PI * tilt_effort );
 	}
 };
 

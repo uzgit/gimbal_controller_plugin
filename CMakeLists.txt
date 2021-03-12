@@ -10,6 +10,7 @@ project(gimbal_controller_plugin)
 find_package(catkin REQUIRED COMPONENTS
   gazebo_dev
   gazebo_ros
+  mavros
   roscpp
 )
 
