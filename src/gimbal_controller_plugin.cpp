@@ -145,17 +145,7 @@ class GimbalControllerPlugin : public ModelPlugin
 
 			std::cerr << "Subscribing to topics:" << std::endl;
 			std::cerr << "\tTarget tilt: " << this->target_tilt_topic << std::endl;
-			std::cerr << "\tTarget  pan: " << this->target_pan_topic << std::endl;
 
-			// initialize x pixel position subscriber
-			ros::SubscribeOptions so_x_pixel_position = ros::SubscribeOptions::create<std_msgs::Float64>(
-				target_pan_topic,
-				1,
-				boost::bind(&GimbalControllerPlugin::set_pan_callback, this, _1),
-				ros::VoidPtr(),
-				& this->ros_queue);
-			this->ros_subscriber_x_pixel_position = this->ros_node->subscribe(so_x_pixel_position);
-			
 			// initialize y pixel position subscriber
 			ros::SubscribeOptions so_y_pixel_position = ros::SubscribeOptions::create<std_msgs::Float64>(
 				target_tilt_topic,
@@ -248,18 +238,12 @@ class GimbalControllerPlugin : public ModelPlugin
 
 	private: void set_control_callback(const mavros_msgs::OverrideRCIn::ConstPtr & _msg)
 	{
-		std::cerr << "in control callback" << std::endl;
-
-		int pan_pwm = _msg->channels[this->pan_channel - 1];
 		int tilt_pwm = _msg->channels[this->tilt_channel - 1];
 
-		double pan_effort  = pwm_signal_to_control_effort(pan_pwm);
 		double tilt_effort = pwm_signal_to_control_effort(tilt_pwm);
 
-		std::cerr << "(pan, tilt) = (" << pan_pwm << ", " << tilt_pwm << ") = (" << pan_effort << ", " << tilt_effort << ")" << std::endl;
-
-		set_pan( M_PI * pan_effort );
 		set_tilt( M_PI * tilt_effort );
+		set_pan(0);
 	}
 };
 
